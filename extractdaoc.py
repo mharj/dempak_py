@@ -1,8 +1,5 @@
 #!/usr/bin/env python
-from __future__ import generators
-from distutils.dir_util import mkpath
-from distutils.file_util import copy_file
-import os, stat, types, re, string, dempak
+import os, stat, re, shutil, dempak
 
 nif_folder = '/mnt/windows/Program Files/Games/Mythic' # replace with your path
 
@@ -28,22 +25,22 @@ re_nmpk = re.compile(r'^.*\.(n|m)pk$', re.IGNORECASE)
 for top, names in walktree(nif_folder):
     for name in names:
         f = top + os.sep + name
-        dest = top[len(nif_folder)+1:] # strip root folder
+        dest = top[len(nif_folder)+1:] or '.' # strip root folder
         if (re_nif.match(name)):
-            print "copying " + dest + os.sep + name
-            mkpath(dest)
-            copy_file(f, dest)
+            print("copying " + dest + os.sep + name)
+            os.makedirs(dest, exist_ok=True)
+            shutil.copy2(f, dest)
         if (re_nmpk.match(name)):
-            print "processing archive " + dest + os.sep + name
+            print("processing archive " + dest + os.sep + name)
             mpak = dempak.MPAKFile(f)
-            for e in mpak.entries:
-                if re_nif.match(e):
-                    print "extracting " + dest + os.sep + e
-                    infile = mpak.open(e)
-                    data = infile.read()
-                    infile.close()
-                    
-                    mkpath(dest)
-                    outfile = open(dest + os.sep + e, 'wb')
-                    outfile.write(data)
-                    outfile.close()
+            try:
+                for e in mpak.entries:
+                    if re_nif.match(e):
+                        print("extracting " + dest + os.sep + e)
+                        with mpak.open(e) as infile:
+                            data = infile.read()
+                        os.makedirs(dest, exist_ok=True)
+                        with open(dest + os.sep + e, 'wb') as outfile:
+                            outfile.write(data)
+            finally:
+                mpak.close()

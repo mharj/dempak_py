@@ -6,14 +6,14 @@
 
 """Dark Age of Camelot .npk/.mpk archive extraction module."""
 
-import zlib, struct, weakref, string
-from cStringIO import StringIO
+import zlib, struct
+from io import BytesIO
 
 class error(IOError): pass
 
 _test = zlib.decompressobj()
 if not hasattr(_test, 'unused_data'):
-    raise error, 'Update your Python: this zlib module is too old'
+    raise error('Update your Python: this zlib module is too old')
 del _test
 
 def _readstream(f):
@@ -23,22 +23,12 @@ the end of the stream on return. Returns the decompressed stream data.
 """
     do = zlib.decompressobj()
 
-    output = ''
-    while do.unused_data == '':
-        str = f.read(1024)
-        if str == '':
-            # Might have (unluckily!) hit EOF just as decompression
-            # ended. Prod the stream and see if that's considered
-            # "unused" data.
-            
-            output += do.decompress('x')
-            if do.unused_data == '':
-                raise error, 'unexpected end of stream'
-            else:
-                f.seek(1 - len(do.unused_data), 1)
-                return output
-            
-        output += do.decompress(str)
+    output = b''
+    while not do.eof:
+        chunk = f.read(1024)
+        if not chunk:
+            raise error('unexpected end of stream')
+        output += do.decompress(chunk)
 
     f.seek(0 - len(do.unused_data), 1)
     return output
@@ -57,8 +47,8 @@ Throws dempak.error or IOError on errors.
         self.f = open(path, 'rb')
 
         # check signature
-        if self.f.read(4) != 'MPAK':
-            raise error, 'not a MPAK archive'
+        if self.f.read(4) != b'MPAK':
+            raise error('not a MPAK archive')
 
         self.f.seek(21)
 
@@ -75,17 +65,13 @@ Throws dempak.error or IOError on errors.
         self.directory = {}
         offset = 0
         while offset + 0x11b < len(dirdata):
-            name = ''
-            i = 0
-            while offset + i < len(dirdata) and dirdata[offset+i] != '\0':
-                name += dirdata[offset+i]
-                i += 1
+            name = dirdata[offset:offset+0x110].split(b'\0', 1)[0].decode('latin-1')
 
             (entryoffset,) = struct.unpack('<I', dirdata[offset+0x110:offset+0x114])
             self.directory[name.lower()] = baseoffset + entryoffset
             offset += 0x11c
 
-        self.entries = self.directory.keys()
+        self.entries = list(self.directory.keys())
         # done.
 
     def open(self, entry):
@@ -95,15 +81,15 @@ Return a file-like object for the archive entry 'entry'.
 Throws dempak.error or IOError on errors.
 """
         if not self.f:
-            raise error, 'file is closed'
+            raise error('file is closed')
 
         entry = entry.lower()
-        if not self.directory.has_key(entry):
-            raise error, 'unknown entry: ' + entry
+        if entry not in self.directory:
+            raise error('unknown entry: ' + entry)
 
         self.f.seek(self.directory[entry])
         data = _readstream(self.f)
-        return StringIO(data)
+        return BytesIO(data)
 
     def close(self):
         self.f.close()
@@ -119,7 +105,7 @@ Throws dempak.error or IOError on errors."""
     
     global _filecache
 
-    if not _filecache.has_key(path):
+    if path not in _filecache:
         _filecache[path] = MPAKFile(path)
 
     return _filecache[path].open(entry)
@@ -128,7 +114,7 @@ def run():
     import sys, os
 
     if len(sys.argv) < 2 or len(sys.argv) > 4:
-        print >>sys.stderr, "Usage: %s <path to .mpk/.npk> <optional output path> <options: -quiet>" % sys.argv[0]
+        print("Usage: %s <path to .mpk/.npk> <optional output path> <options: -quiet>" % sys.argv[0], file=sys.stderr)
         sys.exit(1)
 
     name = sys.argv[1]
@@ -144,7 +130,7 @@ def run():
             if not os.path.isdir(base):
                 os.mkdir(base)
             if not os.path.isdir(base):
-                print >>sys.stderr, "Can't create or find output directory '%s'" % base
+                print("Can't create or find output directory '%s'" % base, file=sys.stderr)
                 sys.exit(1)
             
     if len(sys.argv) >= 4:
@@ -155,7 +141,7 @@ def run():
     for e in f.entries:
         outpath = e
         if base: outpath = os.path.join(base, e)
-        if not quiet: print >>sys.stderr, "Extracting", e, "=>", outpath,
+        if not quiet: print("Extracting", e, "=>", outpath, end=' ', file=sys.stderr)
         
         infile = f.open(e)
         data = infile.read()
@@ -165,7 +151,7 @@ def run():
         outfile.write(data)
         outfile.close()
 
-        if not quiet: print >>sys.stderr, "(" + `len(data)` + " bytes)"
+        if not quiet: print("(" + str(len(data)) + " bytes)", file=sys.stderr)
 
     f.close()
     sys.exit(0)
@@ -173,5 +159,6 @@ def run():
 if __name__ == '__main__': run()
 
 # Changelog:
+#   12-Oct-2026: Python 3 compatibility improvements.
 #   26-Jan-2002: Initial version. Requires Python 2.1 for
 #                the more recent zlib module.
